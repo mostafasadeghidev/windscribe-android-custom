@@ -11,7 +11,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 120
     env:
-      ANDROID_USER_HOME: ${{ runner.temp }}/android-user-home
+      ANDROID_USER_HOME: ${{ github.workspace }}/.android-user-home
       ANDROID_TEST_KEYSTORE_B64: ${{ secrets.ANDROID_TEST_KEYSTORE_B64 }}
     steps:
       - uses: actions/checkout@v4

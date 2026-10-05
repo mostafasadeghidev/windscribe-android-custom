@@ -39,6 +39,10 @@ jobs:
           chmod 600 "$ANDROID_USER_HOME/employee-debug.keystore"
 
       - uses: gradle/actions/setup-gradle@v4
+        with:
+          # The repository includes a vendored StrongSwan wrapper JAR whose hash
+          # is not in Gradle's public allowlist. The build uses the root wrapper.
+          validate-wrappers: false
 
       - name: Build F-Droid debug APK splits (32-bit, 64-bit, universal)
         run: ./gradlew :mobile:assembleFdroidDebug -PemployeeAbiSplits

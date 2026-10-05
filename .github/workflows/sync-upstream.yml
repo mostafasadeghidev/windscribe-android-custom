@@ -1,0 +1,65 @@
+name: Prepare upstream update pull request
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 1
+
+      - name: Apply upstream changes onto the private snapshot
+        id: merge
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git remote add upstream https://github.com/Windscribe/Android-App.git
+          base_sha="$(tr -d '\r\n' < UPSTREAM_BASE.txt)"
+          git fetch --no-tags --depth=100 upstream main
+          new_sha="$(git rev-parse FETCH_HEAD)"
+          if [[ "$base_sha" == "$new_sha" ]]; then
+            echo "No upstream commits to merge."
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          while ! git cat-file -e "${base_sha}^{commit}" 2>/dev/null; do
+            git fetch --no-tags --deepen=100 upstream main
+          done
+          if ! git merge-base --is-ancestor "$base_sha" "$new_sha"; then
+            echo "Recorded base is not an ancestor of current upstream; manual review is needed."
+            exit 1
+          fi
+          git diff --binary --full-index "$base_sha" "$new_sha" > "$RUNNER_TEMP/upstream.patch"
+          branch="upstream-sync-$(date -u +%Y%m%d-%H%M%S)"
+          git switch -c "$branch" main
+          if ! git apply --3way "$RUNNER_TEMP/upstream.patch"; then
+            echo "Upstream changes conflict with local changes. Resolve these locally and open a review pull request."
+            exit 1
+          fi
+          printf '%s\n' "$new_sha" > UPSTREAM_BASE.txt
+          git add -A
+          git commit -m "Sync Android upstream through ${new_sha:0:12}"
+          git push origin "$branch"
+          echo "branch=$branch" >> "$GITHUB_OUTPUT"
+          echo "changed=true" >> "$GITHUB_OUTPUT"
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+      - name: Open review pull request
+        if: steps.merge.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          gh pr create --repo "${{ github.repository }}" --base main --head "${{ steps.merge.outputs.branch }}"
+          --title "Sync Windscribe Android upstream"
+          --body "Applies upstream changes since the recorded base to this private snapshot. Review the diff and run the Android build workflow before merging."

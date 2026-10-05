@@ -1,0 +1,100 @@
+/*
+ * Copyright (c) 2021 Windscribe Limited.
+ */
+
+package com.windscribe.vpn.services.firebasecloud
+
+import android.content.Intent.FLAG_ACTIVITY_NEW_TASK
+import com.google.firebase.messaging.FirebaseMessagingService
+import com.google.firebase.messaging.RemoteMessage
+import com.windscribe.vpn.Windscribe.Companion.appContext
+import com.windscribe.vpn.api.response.PushNotificationAction
+import com.windscribe.vpn.backend.utils.WindVpnController
+import com.windscribe.vpn.billing.GooglePlaySubscriptionUrl
+import dagger.hilt.android.AndroidEntryPoint
+import kotlinx.coroutines.launch
+import org.slf4j.Logger
+import org.slf4j.LoggerFactory
+import javax.inject.Inject
+
+@AndroidEntryPoint
+class WindscribeCloudMessaging : FirebaseMessagingService() {
+    @Inject
+    lateinit var vpnController: WindVpnController
+    private val logger: Logger = LoggerFactory.getLogger("fcm")
+
+    override fun onMessageReceived(remoteMessage: RemoteMessage) {
+        super.onMessageReceived(remoteMessage)
+        if (remoteMessage.notification != null) {
+            logger.info("Message: " + remoteMessage.notification?.body + " Payload: " + remoteMessage.data)
+        }
+        val payload = remoteMessage.data
+        if (payload.containsKey("type")) {
+            when (payload["type"]) {
+                USER_DOWNGRADED -> {
+                    logger.info("Received Account downgrade notification, scheduling service task...")
+                    appContext.workManager.updateSession()
+                }
+
+                USER_EXPIRED -> {
+                    logger.info("Received Account expired notification, scheduling service task...")
+                    with(vpnController) {
+                        scope.launch {
+                            disconnectAsync()
+                            appContext.workManager.updateSession()
+                        }
+                    }
+                }
+
+                GooglePlaySubscriptionUrl.NOTIFICATION_TYPE -> {
+                    GooglePlaySubscriptionUrl
+                        .productIdFromPayload(appContext.packageName, payload)
+                        ?.let(appContext.applicationInterface::showSubscriptionGraceDialog)
+                }
+
+                PROMO -> {
+                    logger.info("Received Promo notification , Launching upgrade Activity.")
+                    val pushNotificationAction = payloadToPushNotificationAction(payload)
+                    if (pushNotificationAction != null) {
+                        val launchIntent = appContext.applicationInterface.upgradeIntent
+                        launchIntent.addFlags(FLAG_ACTIVITY_NEW_TASK)
+                        // Add promo data to intent extras so AppStartActivity can handle it
+                        launchIntent.putExtra("type", "promo")
+                        launchIntent.putExtra("pcpid", pushNotificationAction.pcpID)
+                        launchIntent.putExtra("promo_code", pushNotificationAction.promoCode)
+                        appContext.appLifeCycleObserver.pushNotificationAction = pushNotificationAction
+                        try {
+                            startActivity(launchIntent)
+                        } catch (e: SecurityException) {
+                            logger.error("[WINDSCRIBE_BG_ACTIVITY] Cannot start activity from background: ${e.message}", e)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private fun payloadToPushNotificationAction(payload: Map<String, String>): PushNotificationAction? =
+        payload["pcpid"]?.let {
+            payload["type"]?.let { it1 ->
+                payload["promo_code"]?.let { it2 ->
+                    PushNotificationAction(
+                        pcpID = it,
+                        type = it1,
+                        promoCode = it2,
+                    )
+                }
+            }
+        }
+
+    override fun onNewToken(token: String) {
+        super.onNewToken(token)
+        logger.info("Received new FCM Token")
+    }
+
+    companion object {
+        const val USER_DOWNGRADED = "user_downgraded"
+        const val USER_EXPIRED = "user_expired"
+        const val PROMO = "promo"
+    }
+}

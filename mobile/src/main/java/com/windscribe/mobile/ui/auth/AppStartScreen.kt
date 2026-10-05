@@ -1,0 +1,439 @@
+package com.windscribe.mobile.ui.auth
+
+import FeatureSection
+import android.content.Intent
+import android.content.res.Configuration
+import android.util.Log
+import android.widget.Toast
+import androidx.activity.compose.LocalActivity
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Text
+import androidx.compose.material3.adaptive.ExperimentalMaterial3AdaptiveApi
+import androidx.compose.material3.adaptive.currentWindowAdaptiveInfo
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalWindowInfo
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.tooling.preview.PreviewParameter
+import androidx.compose.ui.tooling.preview.PreviewParameterProvider
+import androidx.compose.ui.unit.dp
+import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
+import androidx.window.core.layout.WindowSizeClass
+import com.windscribe.mobile.R
+import com.windscribe.mobile.ui.AppStartActivity
+import com.windscribe.mobile.ui.common.AppProgressBar
+import com.windscribe.mobile.ui.helper.MultiDevicePreview
+import com.windscribe.mobile.ui.helper.PreviewWithNav
+import com.windscribe.mobile.ui.nav.LocalNavController
+import com.windscribe.mobile.ui.nav.Screen
+import com.windscribe.mobile.ui.theme.AppColors
+import com.windscribe.mobile.ui.theme.font16
+import com.windscribe.mobile.ui.theme.font18
+
+/**
+ * Callbacks the app-start UI can raise. Hoisted out so the stateless [AppStartContent] never
+ * needs to know about [AppStartViewModel] — previews supply no-op lambdas.
+ */
+class AppStartActions(
+    val onSignIntentLaunch: () -> Unit = {},
+    val onSignIntentResult: (Intent?) -> Unit = {},
+)
+
+/**
+ * Stateful entry point. Owns the [AppStartViewModel], collects its flows and wires up navigation
+ * side effects, then delegates rendering to [AppStartContent].
+ */
+@OptIn(ExperimentalMaterial3AdaptiveApi::class)
+@Composable
+fun AppStartScreen(
+    windowSizeClass: WindowSizeClass? = currentWindowAdaptiveInfo().windowSizeClass,
+    viewModel: AppStartViewModel = hiltViewModel<AppStartViewModelImpl>(),
+) {
+    val navController = LocalNavController.current
+    LaunchedEffect(viewModel.loggedIn) {
+        if (viewModel.loggedIn) {
+            navController.navigate(Screen.Home.route) {
+                popUpTo(Screen.Start.route) { inclusive = true }
+            }
+        }
+    }
+    val loginState by viewModel.loginState.collectAsState()
+    LaunchedEffect(loginState) {
+        if (loginState is SsoLoginState.Success) {
+            Log.i("AppStartViewModel", "Logged in successfully.")
+            navController.navigate(Screen.Home.route) {
+                Log.i("AppStartViewModel", "Routing to home.")
+                popUpTo(0) { inclusive = true }
+            }
+        }
+    }
+
+    val isConnected by viewModel.isConnected.collectAsState()
+
+    val context = LocalContext.current
+    LaunchedEffect(loginState) {
+        if (loginState is SsoLoginState.Error) {
+            val errorMessage = (loginState as SsoLoginState.Error).error
+            Toast.makeText(context, errorMessage, Toast.LENGTH_SHORT).show()
+            viewModel.clearLoginState()
+        }
+    }
+
+    AppStartContent(
+        windowSizeClass = windowSizeClass,
+        isConnected = isConnected,
+        loginState = loginState,
+        signInIntent = viewModel.signInIntent,
+        actions =
+            AppStartActions(
+                onSignIntentLaunch = viewModel::onSignIntentLaunch,
+                onSignIntentResult = viewModel::onSignIntentResult,
+            ),
+    )
+}
+
+/**
+ * Stateless app-start UI. Everything it needs is passed in, so it renders identically in the
+ * app and in `@Preview`. This is the composable previews target.
+ */
+@OptIn(ExperimentalMaterial3AdaptiveApi::class)
+@Composable
+fun AppStartContent(
+    windowSizeClass: WindowSizeClass?,
+    isConnected: Boolean,
+    loginState: SsoLoginState,
+    signInIntent: Intent?,
+    actions: AppStartActions = AppStartActions(),
+) {
+    val isExpanded =
+        windowSizeClass?.isWidthAtLeastBreakpoint(
+            WindowSizeClass.WIDTH_DP_EXPANDED_LOWER_BOUND,
+        ) == true
+    if (isExpanded) {
+        ExpandedLayout(isConnected, signInIntent, actions)
+    } else {
+        CompactLayout(isConnected, signInIntent, actions)
+    }
+    if (loginState is SsoLoginState.LoggingIn) {
+        val message = loginState.message
+        AppProgressBar(true, message = message)
+    }
+}
+
+@Composable
+fun CompactLayout(
+    isConnected: Boolean,
+    signInIntent: Intent?,
+    actions: AppStartActions,
+) {
+    Box(
+        modifier =
+            Modifier
+                .padding(0.dp)
+                .fillMaxSize()
+                .background(AppColors.deepBlue),
+    ) {
+        Image(
+            painter = painterResource(R.drawable.welcome_background),
+            contentDescription = "Welcome Image",
+            modifier = Modifier.fillMaxSize(),
+            contentScale = ContentScale.FillWidth,
+        )
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            modifier =
+                Modifier
+                    .fillMaxWidth(1.0f)
+                    .padding(32.dp)
+                    .statusBarsPadding(),
+        ) {
+            Logo()
+            Spacer(modifier = Modifier.weight(1f))
+            FeatureSection()
+            Spacer(modifier = Modifier.weight(1f))
+            ActionSection(isConnected, signInIntent, actions)
+        }
+    }
+}
+
+@Composable
+fun ExpandedLayout(
+    isConnected: Boolean,
+    signInIntent: Intent?,
+    actions: AppStartActions,
+) {
+    Box(
+        modifier =
+            Modifier
+                .padding(0.dp)
+                .fillMaxSize()
+                .background(AppColors.deepBlue),
+    ) {
+        Image(
+            painter = painterResource(R.drawable.welcome_background),
+            contentDescription = "Welcome Image",
+            modifier = Modifier.fillMaxSize(),
+            contentScale = ContentScale.FillWidth,
+        )
+        Row(
+            modifier =
+                Modifier
+                    .fillMaxSize()
+                    .padding(32.dp),
+            horizontalArrangement = Arrangement.SpaceEvenly,
+        ) {
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                modifier = Modifier.weight(1f),
+            ) {
+                Logo()
+                Spacer(modifier = Modifier.weight(1f))
+                FeatureSection()
+                Spacer(modifier = Modifier.weight(1f))
+            }
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                modifier = Modifier.weight(1f),
+            ) {
+                Spacer(modifier = Modifier.weight(1f))
+                ActionSection(isConnected, signInIntent, actions)
+                Spacer(modifier = Modifier.weight(1f))
+            }
+        }
+    }
+}
+
+@Composable
+fun isTabletInLandscapeMode(): Boolean {
+    val configuration = LocalConfiguration.current
+    val isLandscape = configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
+    return LocalWindowInfo.current.containerSize.width >= 900 && isLandscape
+}
+
+@Composable
+fun Logo() {
+    val topPadding =
+        if (isTabletInLandscapeMode()) {
+            144.dp
+        } else {
+            32.dp
+        }
+    Image(
+        painter = painterResource(R.drawable.badge_logo),
+        contentDescription = "Badge Logo",
+        modifier =
+            Modifier
+                .padding(top = topPadding)
+                .size(54.dp),
+    )
+}
+
+@Composable
+private fun GoogleButton(
+    signInIntent: Intent?,
+    actions: AppStartActions,
+) {
+    val interactionSource = remember { MutableInteractionSource() }
+    val launcher =
+        rememberLauncherForActivityResult(
+            contract = ActivityResultContracts.StartActivityForResult(),
+        ) { result ->
+            Log.i("AppStartViewModel", "result: ${result.data}")
+            actions.onSignIntentResult(result.data)
+        }
+    val activity = LocalActivity.current as? AppStartActivity
+    Button(
+        onClick = {
+            if (com.windscribe.mobile.BuildConfig.FLAVOR == "google") {
+                if (signInIntent == null) {
+                    Toast.makeText(activity, "Google Signin not available.", Toast.LENGTH_SHORT).show()
+                    return@Button
+                }
+                actions.onSignIntentLaunch()
+                launcher.launch(signInIntent)
+            } else {
+                Toast.makeText(activity, "Google Sign-in not available in F-Droid version", Toast.LENGTH_SHORT).show()
+            }
+        },
+        Modifier
+            .height(48.dp)
+            .fillMaxWidth(),
+        colors =
+            ButtonDefaults.buttonColors(
+                containerColor = AppColors.white,
+                disabledContainerColor = AppColors.white,
+                disabledContentColor = AppColors.black,
+                contentColor = AppColors.black,
+            ),
+        interactionSource = interactionSource,
+        shape = RoundedCornerShape(24.dp),
+    ) {
+        Row {
+            Image(
+                painter = painterResource(R.drawable.google_logo),
+                contentDescription = "Google Logo",
+                modifier = Modifier.size(24.dp),
+            )
+            Spacer(modifier = Modifier.width(10.dp))
+            Text(
+                text = stringResource(com.windscribe.vpn.R.string.continue_with_google),
+                style = font18.copy(fontWeight = FontWeight.Medium),
+                color = AppColors.black,
+            )
+        }
+    }
+}
+
+@Composable
+private fun LoginButton() {
+    val navController = LocalNavController.current
+    val interactionSource = remember { MutableInteractionSource() }
+    Button(
+        onClick = {
+            navController.currentBackStackEntry?.savedStateHandle?.set("isAccountClaim", false)
+            navController.navigate(Screen.Login.route)
+        },
+        Modifier
+            .testTag("welcome_login_button")
+            .height(48.dp)
+            .fillMaxWidth()
+            .border(1.dp, AppColors.white.copy(alpha = 0.30f), RoundedCornerShape(24.dp)),
+        colors =
+            ButtonDefaults.buttonColors(
+                containerColor = Color.Transparent,
+                disabledContainerColor = Color.Transparent,
+                disabledContentColor = AppColors.white,
+                contentColor = AppColors.white,
+            ),
+        interactionSource = interactionSource,
+        shape = RoundedCornerShape(24.dp),
+    ) {
+        Text(
+            text = stringResource(com.windscribe.vpn.R.string.login),
+            style = font18.copy(fontWeight = FontWeight.Medium),
+            color = AppColors.white,
+        )
+    }
+}
+
+@Composable
+fun EmergencyConnectButton(isConnected: Boolean) {
+    val navController = LocalNavController.current
+    val context = LocalContext.current
+    Text(
+        text = if (isConnected) "Emergency Connect On" else "Can’t Connect?",
+        style = font18.copy(fontWeight = FontWeight.Medium),
+        color = if (isConnected) Color(0xFF61FF8A) else Color(0xFF838D9B),
+        modifier =
+            Modifier.clickable {
+                if (com.windscribe.mobile.BuildConfig.FLAVOR == "google") {
+                    navController.navigate(Screen.EmergencyConnect.route)
+                } else {
+                    Toast.makeText(context, "Emergency Connect not available in F-Droid version", Toast.LENGTH_SHORT).show()
+                }
+            },
+    )
+}
+
+@Composable
+private fun SignupButton() {
+    val navController = LocalNavController.current
+    Text(
+        text = stringResource(com.windscribe.vpn.R.string.text_sign_up),
+        style = font16.copy(fontWeight = FontWeight.Medium),
+        color = Color(0xFF838D9B),
+        modifier =
+            Modifier.clickable {
+                navController.navigate(Screen.Signup.route)
+            },
+    )
+}
+
+@Composable
+fun ActionSection(
+    isConnected: Boolean,
+    signInIntent: Intent?,
+    actions: AppStartActions,
+) {
+    Column(
+        modifier =
+            Modifier
+                .widthIn(min = 325.dp, max = 373.dp)
+                .statusBarsPadding()
+                .navigationBarsPadding(),
+        verticalArrangement = Arrangement.spacedBy(22.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        GoogleButton(signInIntent, actions)
+        LoginButton()
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            EmergencyConnectButton(isConnected)
+            Spacer(modifier = Modifier.weight(1f))
+            SignupButton()
+            Spacer(modifier = Modifier.width(8.dp))
+        }
+    }
+}
+
+/**
+ * Feeds representative [SsoLoginState] values into the preview. The renderer draws
+ * [AppStartContent] once per value.
+ */
+private class AppStartStateProvider : PreviewParameterProvider<SsoLoginState> {
+    override val values =
+        sequenceOf(
+            SsoLoginState.Idle,
+            SsoLoginState.LoggingIn("Logging in"),
+        )
+}
+
+@OptIn(ExperimentalMaterial3AdaptiveApi::class)
+@Composable
+@MultiDevicePreview
+private fun AppStartContentPreview(
+    @PreviewParameter(AppStartStateProvider::class) loginState: SsoLoginState,
+) {
+    PreviewWithNav {
+        AppStartContent(
+            windowSizeClass = currentWindowAdaptiveInfo().windowSizeClass,
+            isConnected = false,
+            loginState = loginState,
+            signInIntent = null,
+        )
+    }
+}

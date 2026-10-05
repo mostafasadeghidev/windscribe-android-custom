@@ -1,0 +1,49 @@
+name: Build Android private test APKs
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    env:
+      ANDROID_USER_HOME: ${{ runner.temp }}/android-user-home
+      ANDROID_TEST_KEYSTORE_B64: ${{ secrets.ANDROID_TEST_KEYSTORE_B64 }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: android-actions/setup-android@v3
+
+      - name: Install persistent private-test signing key
+        shell: bash
+        run: |
+          if [[ -z "$ANDROID_TEST_KEYSTORE_B64" ]]; then
+            echo "Missing repository Actions secret ANDROID_TEST_KEYSTORE_B64. Add the existing employee test keystore as a base64-encoded secret so APK updates keep the same signature."
+            exit 1
+          fi
+          mkdir -p "$ANDROID_USER_HOME"
+          printf '%s' "$ANDROID_TEST_KEYSTORE_B64" | base64 --decode > "$ANDROID_USER_HOME/employee-debug.keystore"
+          chmod 600 "$ANDROID_USER_HOME/employee-debug.keystore"
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Build F-Droid debug APK splits (32-bit, 64-bit, universal)
+        run: ./gradlew :mobile:assembleFdroidDebug -PemployeeAbiSplits
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windscribe-android-private-test
+          path: mobile/build/outputs/apk/fdroid/debug/*.apk
+          if-no-files-found: error
+          retention-days: 14

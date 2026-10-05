@@ -1,0 +1,36 @@
+package com.windscribe.vpn.commonutils
+
+import java.io.InputStream
+import java.security.MessageDigest
+
+object HashUtils {
+    /**
+     * Generate SHA256 hash from InputStream (truncated to 128 bits)
+     * @param inputStream The input stream to hash
+     * @return Hex string of truncated SHA256 hash (32 hex chars) prefixed with "0x" = 34 chars total
+     */
+    fun sha256FromInputStream(inputStream: InputStream): String {
+        val digest = MessageDigest.getInstance("SHA-256")
+        val buffer = ByteArray(8192)
+        var read: Int
+
+        inputStream.use { stream ->
+            while (stream.read(buffer).also { read = it } != -1) {
+                digest.update(buffer, 0, read)
+            }
+        }
+
+        val hashBytes = digest.digest()
+        // Truncate to last 16 bytes (128 bits = 32 hex characters)
+        return "0x" + hashBytes.takeLast(16).joinToString("") { "%02x".format(it) }
+    }
+
+    private val ACCOUNT_HASH_FORMAT = Regex("^0x[0-9a-f]{32}$")
+
+    /**
+     * True if [value] has the shape produced by [sha256FromInputStream], i.e. it is an account
+     * hash. Hashed accounts authenticate with username == password == this value, so a username
+     * matching here is a live credential and must never be disclosed as an identifier.
+     */
+    fun isAccountHash(value: String): Boolean = ACCOUNT_HASH_FORMAT.matches(value)
+}

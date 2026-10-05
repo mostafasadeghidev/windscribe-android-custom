@@ -1,0 +1,617 @@
+package com.windscribe.mobile.ui.serverlist
+
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
+import androidx.compose.material3.ripple
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateMapOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ColorFilter
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.colorResource
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import com.windscribe.mobile.R
+import com.windscribe.mobile.ui.common.DataCenterFavouriteIcon
+import com.windscribe.mobile.ui.common.DataCenterIcon
+import com.windscribe.mobile.ui.common.DataCenterLatencyIcon
+import com.windscribe.mobile.ui.common.DataCenterName
+import com.windscribe.mobile.ui.common.DataCenterNoP2PIcon
+import com.windscribe.mobile.ui.common.healthColor
+import com.windscribe.mobile.ui.connection.ConnectionViewmodel
+import com.windscribe.mobile.ui.helper.HandleScrollHaptic
+import com.windscribe.mobile.ui.helper.latencyArcStart
+import com.windscribe.mobile.ui.home.HomeViewmodel
+import com.windscribe.mobile.ui.home.UserState
+import com.windscribe.mobile.ui.nav.LocalNavController
+import com.windscribe.mobile.ui.nav.Screen
+import com.windscribe.mobile.ui.theme.AppColors
+import com.windscribe.mobile.ui.theme.expandedServerItemTextColor
+import com.windscribe.mobile.ui.theme.font12
+import com.windscribe.mobile.ui.theme.font16
+import com.windscribe.mobile.ui.theme.font9
+import com.windscribe.mobile.ui.theme.isDark
+import com.windscribe.mobile.ui.theme.serverItemTextColor
+import com.windscribe.mobile.ui.theme.serverListSecondaryColor
+import com.windscribe.vpn.commonutils.FlagIconResource
+import com.windscribe.vpn.serverlist.entity.Datacenter
+import com.windscribe.vpn.serverlist.entity.DatacenterStatus
+import com.windscribe.vpn.serverlist.entity.DatacenterStatusHelper
+
+private const val MIN_HEALTH_VALUE = 50
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun AllServerList(
+    viewModel: ServerViewModel,
+    connectionViewModel: ConnectionViewmodel,
+    homeViewmodel: HomeViewmodel,
+) {
+    val state by viewModel.serverListState.collectAsState()
+    val expandedStates = remember { mutableStateMapOf<String, Boolean>() }
+    val bestLocation by connectionViewModel.bestLocation.collectAsState()
+    val isRefreshing by viewModel.refreshState.collectAsState()
+
+    Box(modifier = Modifier.testTag("server_list_all")) {
+        Column(
+            modifier =
+                Modifier
+                    .fillMaxSize()
+                    .padding(top = 0.dp),
+            verticalArrangement = Arrangement.Top,
+        ) {
+            when (state) {
+                is ListState.Loading -> {
+                    ProgressIndicator()
+                }
+
+                is ListState.Error -> {
+                    Text("Error loading server list")
+                }
+
+                is ListState.Success -> {
+                    val lazyListState = rememberLazyListState()
+                    HandleScrollHaptic(lazyListState, homeViewmodel)
+                    val list = (state as ListState.Success).data
+                    PullToRefreshBox(
+                        isRefreshing = isRefreshing,
+                        onRefresh = {
+                            viewModel.refresh(ServerListType.All)
+                        },
+                        modifier = Modifier.weight(1f),
+                    ) {
+                        LazyColumn(state = lazyListState) {
+                            item {
+                                LocationCount(viewModel)
+                                Spacer(modifier = Modifier.height(8.dp))
+                                bestLocation?.let {
+                                    BestLocation(
+                                        it,
+                                        connectionViewModel,
+                                        homeViewmodel,
+                                        serverListViewModel = viewModel,
+                                    )
+                                }
+                            }
+                            items(list, key = { it.id }) { item ->
+                                ExpandableListItem(
+                                    viewModel,
+                                    connectionViewModel,
+                                    homeViewmodel,
+                                    serverListViewModel = viewModel,
+                                    item,
+                                    expanded = expandedStates[item.region.name.orEmpty()] == true,
+                                    onExpandChange = { expandedStates[item.region.name.orEmpty()] = it },
+                                )
+                            }
+                        }
+                    }
+                    UpgradeBar(homeViewmodel)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun UpgradeBar(viewModel: HomeViewmodel) {
+    val navController = LocalNavController.current
+    val userState by viewModel.userState.collectAsState()
+    val hapticFeedbackEnabled by viewModel.hapticFeedbackEnabled.collectAsState()
+    val haptic = LocalHapticFeedback.current
+    if (userState is UserState.Free) {
+        val angle = (userState as UserState.Free).dataLeftAngle
+        val textColor =
+            if (angle <= 0) {
+                AppColors.red
+            } else if (angle > 0 && angle <= 36) {
+                Color.Yellow
+            } else {
+                AppColors.neonGreen
+            }
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .padding(top = 8.dp, start = 16.dp, end = 16.dp),
+        ) {
+            Row(
+                modifier =
+                    Modifier
+                        .fillMaxWidth()
+                        .background(color = AppColors.midnightNavy, shape = RoundedCornerShape(8.dp))
+                        .clickable {
+                            if (hapticFeedbackEnabled) haptic.performHapticFeedback(HapticFeedbackType.ContextClick)
+                            navController.navigate(Screen.Upgrade.route)
+                        }.border(
+                            width = 1.dp,
+                            color = AppColors.white.copy(alpha = 0.1f),
+                            shape = RoundedCornerShape(8.dp),
+                        ).padding(12.dp),
+            ) {
+                Row {
+                    Box(
+                        modifier =
+                            Modifier
+                                .size(40.dp),
+                    ) {
+                        Canvas(
+                            modifier =
+                                Modifier
+                                    .size(40.dp),
+                        ) {
+                            val strokeWidth = 3.dp.toPx()
+
+                            drawArc(
+                                color = if (angle > 0 && angle <= 36) Color.Yellow else AppColors.neonGreen,
+                                startAngle = 160f,
+                                sweepAngle = angle,
+                                useCenter = false,
+                                style = Stroke(width = strokeWidth, cap = StrokeCap.Butt),
+                                size = Size(size.width, size.height),
+                                topLeft = Offset.Zero,
+                            )
+
+                            drawArc(
+                                color = AppColors.white.copy(alpha = 0.20f),
+                                startAngle = 160f + angle,
+                                sweepAngle = 360f - angle,
+                                useCenter = false,
+                                style = Stroke(width = strokeWidth, cap = StrokeCap.Butt),
+                                size = Size(size.width, size.height),
+                                topLeft = Offset.Zero,
+                            )
+                        }
+                        Text(
+                            (userState as UserState.Free).dataLeft,
+                            style = font9,
+                            lineHeight = 9.sp,
+                            textAlign = TextAlign.Center,
+                            color = textColor,
+                            modifier = Modifier.align(Alignment.Center),
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(16.dp))
+                    Column {
+                        Text(
+                            stringResource(com.windscribe.vpn.R.string.unblock_full_access),
+                            style = font16.copy(fontSize = 15.sp),
+                            color = AppColors.white,
+                        )
+                        Spacer(modifier = Modifier.width(2.dp))
+                        Text(
+                            stringResource(com.windscribe.vpn.R.string.go_pro_for_unlimited_everything),
+                            style = font12,
+                            color = AppColors.cyberBlue.copy(alpha = 0.7f),
+                        )
+                    }
+                    Spacer(modifier = Modifier.weight(1.0f))
+                    Image(
+                        painter = painterResource(R.drawable.arrow_right),
+                        contentDescription = "Upgrade",
+                        modifier =
+                            Modifier
+                                .size(16.dp)
+                                .align(Alignment.CenterVertically),
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun LocationCount(viewModel: ServerViewModel) {
+    val serverListState by viewModel.serverListState.collectAsState()
+    if (serverListState is ListState.Success) {
+        val totalCities = (serverListState as ListState.Success).data.sumOf { it.datacenters.size }
+        Text(
+            text = "All locations ($totalCities)",
+            style = font12,
+            color = MaterialTheme.colorScheme.serverItemTextColor,
+            modifier = Modifier.padding(start = 8.dp, top = 16.dp),
+        )
+    }
+}
+
+@Composable
+fun LocationSplitBorderCircle(
+    health: Int,
+    flagRes: Int,
+    showProIcon: Boolean = false,
+    showLocationLoad: Boolean = false,
+) {
+    val color = colorResource(healthColor(health))
+    val angle = (health / 100f) * 360f
+    val secondColor = MaterialTheme.colorScheme.serverListSecondaryColor.copy(alpha = 0.20f)
+
+    Box(modifier = Modifier.size(24.dp)) {
+        Image(
+            painter = painterResource(id = flagRes),
+            contentDescription = "Flag",
+            modifier =
+                Modifier
+                    .size(20.dp)
+                    .align(Alignment.Center),
+            colorFilter =
+                if (flagRes == R.drawable.ic_dc) {
+                    ColorFilter.tint(
+                        MaterialTheme.colorScheme.expandedServerItemTextColor,
+                    )
+                } else {
+                    null
+                },
+        )
+        Canvas(modifier = Modifier.size(24.dp)) {
+            val strokeWidth = 1.dp.toPx()
+            if (angle == 0f || !showLocationLoad) return@Canvas
+            drawArc(
+                color = color,
+                startAngle = latencyArcStart, // Start from top
+                sweepAngle = angle,
+                useCenter = false,
+                style = Stroke(width = strokeWidth, cap = StrokeCap.Butt),
+                size = Size(size.width, size.height),
+                topLeft = Offset.Zero,
+            )
+
+            drawArc(
+                color = secondColor,
+                startAngle = latencyArcStart + angle,
+                sweepAngle = 360f - angle,
+                useCenter = false,
+                style = Stroke(width = strokeWidth, cap = StrokeCap.Butt),
+                size = Size(size.width, size.height),
+                topLeft = Offset.Zero,
+            )
+        }
+        if (showProIcon) {
+            Image(
+                painter = painterResource(if (MaterialTheme.colorScheme.isDark) R.drawable.pro_mask else R.drawable.pro_mask_light),
+                contentDescription = "Flag",
+                modifier =
+                    Modifier
+                        .align(Alignment.CenterStart)
+                        .size(16.dp)
+                        .offset(x = (-6).dp),
+            )
+        }
+    }
+}
+
+@Composable
+fun DataCenterSplitBorderCircle(
+    health: Int,
+    flagRes: Int,
+    showProIcon: Boolean = false,
+    showLocationLoad: Boolean = false,
+    modifier: Modifier,
+) {
+    val color = colorResource(healthColor(health))
+    val angle = (health / 100f) * 360f
+    val secondColor = MaterialTheme.colorScheme.serverListSecondaryColor.copy(alpha = 0.20f)
+    val needsColorFilter = flagRes == R.drawable.ic_dc || flagRes == R.drawable.city_ten_gbps
+    val strokeWidth = 1.dp
+
+    Box(modifier = Modifier.size(24.dp)) {
+        Image(
+            painter = painterResource(id = flagRes),
+            contentDescription = null,
+            modifier = modifier.align(Alignment.Center),
+            colorFilter = if (needsColorFilter) ColorFilter.tint(MaterialTheme.colorScheme.expandedServerItemTextColor) else null,
+        )
+
+        if (showLocationLoad && angle > 0f) {
+            Canvas(modifier = Modifier.size(24.dp)) {
+                val strokePx = strokeWidth.toPx()
+                val canvasSize = Size(size.width, size.height)
+                val strokeStyle = Stroke(width = strokePx, cap = StrokeCap.Butt)
+
+                drawArc(
+                    color = color,
+                    startAngle = latencyArcStart,
+                    sweepAngle = angle,
+                    useCenter = false,
+                    style = strokeStyle,
+                    size = canvasSize,
+                )
+
+                drawArc(
+                    color = secondColor,
+                    startAngle = latencyArcStart + angle,
+                    sweepAngle = 360f - angle,
+                    useCenter = false,
+                    style = strokeStyle,
+                    size = canvasSize,
+                )
+            }
+        }
+
+        if (showProIcon) {
+            Image(
+                painter = painterResource(if (MaterialTheme.colorScheme.isDark) R.drawable.pro_mask else R.drawable.pro_mask_light),
+                contentDescription = null,
+                modifier =
+                    Modifier
+                        .align(Alignment.CenterStart)
+                        .size(16.dp)
+                        .offset(x = (-6).dp),
+            )
+        }
+    }
+}
+
+@Composable
+private fun BestLocation(
+    item: ServerListItem,
+    connectionViewModel: ConnectionViewmodel,
+    homeViewmodel: HomeViewmodel,
+    serverListViewModel: ServerViewModel,
+) {
+    val health by serverListViewModel.observeAverageRegionHealth(item.datacenters).collectAsState(initial = MIN_HEALTH_VALUE)
+    val showLocationLoad by homeViewmodel.showLocationLoad.collectAsState()
+    Column(
+        verticalArrangement = Arrangement.Center,
+        modifier =
+            Modifier
+                .fillMaxWidth()
+                .background(Color.Transparent)
+                .padding(start = 12.dp, end = 8.dp)
+                .clickable {
+                    connectionViewModel.onCityClick(item.datacenters.first())
+                },
+    ) {
+        Row(
+            modifier =
+                Modifier
+                    .fillMaxWidth()
+                    .height(48.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            LocationSplitBorderCircle(
+                health = health,
+                flagRes = FlagIconResource.getSmallFlag(item.region.countryCode),
+                showLocationLoad = showLocationLoad,
+            )
+            Spacer(modifier = Modifier.width(16.dp))
+            Text(
+                text = stringResource(com.windscribe.vpn.R.string.best_location),
+                style = font16.copy(fontWeight = FontWeight.Medium),
+                modifier = Modifier.weight(1f),
+                color = MaterialTheme.colorScheme.serverItemTextColor,
+                textAlign = TextAlign.Start,
+            )
+            Spacer(modifier = Modifier.weight(1.0f))
+            Image(
+                painter = painterResource(R.drawable.arrow_right),
+                contentDescription = "Expand",
+                modifier =
+                    Modifier
+                        .size(32.dp)
+                        .padding(8.dp),
+                colorFilter = ColorFilter.tint(MaterialTheme.colorScheme.serverListSecondaryColor),
+            )
+        }
+    }
+}
+
+@Composable
+private fun ExpandableListItem(
+    viewModel: ServerViewModel,
+    connectionViewModel: ConnectionViewmodel,
+    homeViewmodel: HomeViewmodel,
+    serverListViewModel: ServerViewModel,
+    item: ServerListItem,
+    expanded: Boolean,
+    onExpandChange: (Boolean) -> Unit,
+) {
+    val health by serverListViewModel.observeAverageRegionHealth(item.datacenters).collectAsState(initial = MIN_HEALTH_VALUE)
+    val isPremium by serverListViewModel
+        .observeRegionPremiumStatus(
+            item.datacenters,
+            item.region.countryCode,
+        ).collectAsState(initial = false)
+    val userState by homeViewmodel.userState.collectAsState()
+    val showLocationLoad by homeViewmodel.showLocationLoad.collectAsState()
+    val interactionSource = remember { MutableInteractionSource() }
+    Column(
+        verticalArrangement = Arrangement.Center,
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Row(
+            modifier =
+                Modifier
+                    .fillMaxWidth()
+                    .height(48.dp)
+                    .testTag("country_row")
+                    .clickable(
+                        interactionSource,
+                        indication = ripple(bounded = true, color = MaterialTheme.colorScheme.serverListSecondaryColor),
+                    ) {
+                        onExpandChange(!expanded)
+                    }.padding(start = 12.dp, end = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            LocationSplitBorderCircle(
+                health = health,
+                flagRes = FlagIconResource.getSmallFlag(item.region.countryCode),
+                showProIcon = userState !is UserState.Pro && isPremium,
+                showLocationLoad = showLocationLoad,
+            )
+            Spacer(modifier = Modifier.size(16.dp))
+            Text(
+                text = item.region.name ?: "",
+                style = font16.copy(fontWeight = FontWeight.Medium),
+                modifier = Modifier.weight(1f),
+                color =
+                    if (expanded) {
+                        MaterialTheme.colorScheme.expandedServerItemTextColor
+                    } else {
+                        MaterialTheme.colorScheme.serverItemTextColor
+                    },
+                textAlign = TextAlign.Start,
+            )
+            Image(
+                painter = painterResource(if (expanded) R.drawable.ic_server_list_open else R.drawable.ic_server_list_close),
+                contentDescription = "Expand",
+                colorFilter = ColorFilter.tint(MaterialTheme.colorScheme.serverListSecondaryColor),
+                alpha = if (expanded) 1f else 0.4f,
+                modifier =
+                    Modifier
+                        .testTag("country_chevron")
+                        .size(32.dp)
+                        .padding(8.dp)
+                        .clickable(
+                            interactionSource = remember { MutableInteractionSource() },
+                            indication =
+                                ripple(
+                                    bounded = false,
+                                    radius = 16.dp,
+                                    color = MaterialTheme.colorScheme.expandedServerItemTextColor,
+                                ),
+                        ) {
+                            onExpandChange(!expanded)
+                        },
+            )
+        }
+        AnimatedVisibility(visible = expanded) {
+            Column {
+                item.datacenters.forEach {
+                    DataCenterItem(it, item.region.countryCode, viewModel, connectionViewModel, homeViewmodel)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun DataCenterItem(
+    item: Datacenter,
+    countryCode: String?,
+    viewModel: ServerViewModel,
+    connectionViewModel: ConnectionViewmodel,
+    homeViewmodel: HomeViewmodel,
+) {
+    val favouriteState by viewModel.favouriteListState.collectAsState()
+    val showLocationLoad by homeViewmodel.showLocationLoad.collectAsState()
+    var isFavorite = false
+    if (favouriteState is ListState.Success) {
+        isFavorite = (favouriteState as ListState.Success).data.any { it.city.id == item.id }
+    }
+    val health by viewModel.observeAverageHealth(item.id).collectAsState(initial = MIN_HEALTH_VALUE)
+    val latencyState by viewModel.latencyListState.collectAsState()
+    val latency by rememberUpdatedState(
+        if (latencyState is ListState.Success) {
+            (latencyState as ListState.Success).data.find { it.id == item.id }?.time ?: -1
+        } else {
+            -1
+        },
+    )
+    val serverCount by viewModel.observeDatacenterServerCount(item.id).collectAsState(initial = 0)
+    val isPro by viewModel.isPro.collectAsState()
+    val hasAlcAccess = viewModel.hasAlcAccessForCountry(countryCode)
+    val isAvailable = DatacenterStatusHelper.getStatus(item, serverCount, isPro, hasAlcAccess) == DatacenterStatus.Available
+    val interactionSource = remember { MutableInteractionSource() }
+    Row(
+        modifier =
+            Modifier
+                .fillMaxWidth()
+                .height(48.dp)
+                .clickable(
+                    interactionSource,
+                    indication = ripple(bounded = true, color = MaterialTheme.colorScheme.serverListSecondaryColor),
+                ) {
+                    connectionViewModel.onCityClick(item)
+                }.padding(horizontal = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        DataCenterIcon(item, health, showLocationLoad, serverCount, isPro, hasAlcAccess)
+        Spacer(modifier = Modifier.width(8.dp))
+        DataCenterName("${item.nodeName} ${item.nickName}", Modifier.weight(1f))
+        if (item.p2p != 1) {
+            DataCenterNoP2PIcon()
+            Spacer(modifier = Modifier.width(12.dp))
+        }
+        if (isAvailable) {
+            DataCenterLatencyIcon(latency)
+            Spacer(modifier = Modifier.width(12.dp))
+        }
+        DataCenterFavouriteIcon(isFavorite, testTag = "fav_icon") {
+            viewModel.toggleFavorite(item)
+        }
+    }
+}
+
+@Composable
+private fun ProgressIndicator() {
+    Box(modifier = Modifier.fillMaxSize()) {
+        CircularProgressIndicator(
+            modifier =
+                Modifier
+                    .size(24.dp)
+                    .align(Alignment.Center),
+            color = AppColors.white,
+        )
+    }
+}

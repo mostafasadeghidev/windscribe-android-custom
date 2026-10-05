@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  ~ Copyright (c) 2021 Windscribe Limited.
+  -->
+
+<resources>
+    <!--Dimensions -->
+    <dimen name="reg_1dp">1dp</dimen>
+    <dimen name="reg_2dp">2dp</dimen>
+    <dimen name="reg_8dp">8dp</dimen>
+    <dimen name="reg_10dp">10dp</dimen>
+    <dimen name="reg_12dp">12dp</dimen>
+    <dimen name="reg_14dp">14dp</dimen>
+    <dimen name="reg_16dp">16dp</dimen>
+    <dimen name="reg_20dp">20dp</dimen>
+    <dimen name="reg_24dp">24dp</dimen>
+    <dimen name="reg_28dp">28dp</dimen>
+    <dimen name="reg_32dp">32dp</dimen>
+    <dimen name="reg_40dp">40dp</dimen>
+    <dimen name="reg_48dp">48dp</dimen>
+    <dimen name="reg_50dp">50dp</dimen>
+    <dimen name="reg_68dp">68dp</dimen>
+    <dimen name="reg_80dp">80dp</dimen>
+
+    <!-- TextSize -->
+    <dimen name="text_size_10">10sp</dimen>
+    <dimen name="text_size_12">12sp</dimen>
+    <dimen name="text_size_14">14sp</dimen>
+    <dimen name="text_size_16">16sp</dimen>
+    <dimen name="text_size_24">24sp</dimen>
+    <!-- Margins -->
+    <dimen name="margin_8">8dp</dimen>
+    <dimen name="margin_16">16dp</dimen>
+    <dimen name="margin_24">24dp</dimen>
+    <dimen name="margin_32">32dp</dimen>
+    <dimen name="margin_48">48dp</dimen>
+<!--    <dimen name="margin_54">54dp</dimen>-->
+    <dimen name="margin_60">60dp</dimen>
+    <!-- Padding -->
+    <dimen name="padding_8">8dp</dimen>
+    <dimen name="padding_14">14dp</dimen>
+    <dimen name="padding_16">16dp</dimen>
+    <dimen name="padding_24">24dp</dimen>
+    <dimen name="padding_32">32dp</dimen>
+    <dimen name="padding_48">48dp</dimen>
+    <!--OpenVPN -->
+
+</resources>

@@ -10,5 +10,9 @@ In GitHub, open **Actions → Prepare upstream update pull request → Run workf
 
 Run **Actions → Build Android private test APKs → Run workflow**. It produces F-Droid debug APKs for ARM 32-bit, ARM 64-bit, and universal installation. Builds are manually triggered; they are not automatically published.
 
-The workflow expects the repository Actions secret `ANDROID_TEST_KEYSTORE_B64`, containing the base64 encoding of the private employee debug keystore already used for local test builds. Keeping the same key lets Android install later APKs as updates. Do not add the keystore file or its contents to Git. Artifacts expire after 14 days.
+The workflow reads the repository Actions secret `ANDROID_TEST_KEYSTORE_B64`, containing the base64 encoding of the existing private test keystore. It is stored in GitHub Actions secrets and is not committed to Git. Keeping this keystore lets Android install later APKs as updates to builds signed with the same key. Artifacts expire after 14 days.
+
+## Install updates
+
+Private test builds skip Windscribe's update-check API. Download replacement APKs from this repository's **Actions** artifacts and install them manually. A private GitHub repository cannot provide an in-app updater to an installed client without a separate authenticated update service; never embed a GitHub token in the app.
 

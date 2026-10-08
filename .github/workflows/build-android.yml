@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   build:
@@ -53,3 +53,24 @@ jobs:
           path: mobile/build/outputs/apk/fdroid/debug/*.apk
           if-no-files-found: error
           retention-days: 14
+
+      - name: Publish GitHub release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          version="$(sed -nE 's/^extra\["appVersionName"\] = "([^"]+)".*/\1/p' build.gradle.kts)"
+          if [[ -z "$version" ]]; then
+            echo "Could not read appVersionName from build.gradle.kts." >&2
+            exit 1
+          fi
+          short="${GITHUB_SHA:0:7}"
+          tag="v${version}-private-${short}"
+          if ! gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release create "$tag" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --prerelease \
+              --title "Private test ${version} (${short})" \
+              --notes "Private test build of commit ${GITHUB_SHA}. F-Droid debug APKs signed with the persistent private test keystore, so they install as updates over earlier private test builds." \
+              || true
+          fi
+          gh release upload "$tag" mobile/build/outputs/apk/fdroid/debug/*.apk --repo "$GITHUB_REPOSITORY" --clobber

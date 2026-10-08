@@ -12,7 +12,9 @@ Run **Actions → Build Android private test APKs → Run workflow**. It produce
 
 The workflow reads the repository Actions secret `ANDROID_TEST_KEYSTORE_B64`, containing the base64 encoding of the existing private test keystore. It is stored in GitHub Actions secrets and is not committed to Git. Keeping this keystore lets Android install later APKs as updates to builds signed with the same key. Artifacts expire after 14 days.
 
+Each successful build also attaches the three APKs to a GitHub pre-release tagged `v<appVersionName>-private-<short commit>`. Releases do not expire; use the **Releases** page for downloads that must outlive the 14-day artifact window.
+
 ## Install updates
 
-Private test builds skip Windscribe's update-check API. Download replacement APKs from this repository's **Actions** artifacts and install them manually. A private GitHub repository cannot provide an in-app updater to an installed client without a separate authenticated update service; never embed a GitHub token in the app.
+Private test builds skip Windscribe's update-check API. Download replacement APKs from this repository's **Releases** page (or the **Actions** artifacts) and install them manually. A private GitHub repository cannot provide an in-app updater to an installed client without a separate authenticated update service; never embed a GitHub token in the app.
 

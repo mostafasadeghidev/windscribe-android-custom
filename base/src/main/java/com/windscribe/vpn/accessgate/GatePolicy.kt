@@ -16,12 +16,29 @@ data class GateState(
     val lastOkServer: Long = 0,
     val graceSec: Long = 0,
     val intervalSec: Long = 3600,
+    /** App running time since the last valid answer, counted only while checks are failing. */
+    val unreachableMs: Long = 0,
 )
 
+/**
+ * A session never expires with wall-clock time; only an explicit signed revocation ends it. As a guard
+ * against blocking the access server on purpose, the device is locked after [MAX_UNREACHABLE_MS] of app
+ * running time without a single valid answer. Time while the app is not running or the device sleeps
+ * is not counted.
+ */
 object GatePolicy {
-    fun withinGrace(state: GateState, now: Long): Boolean =
-        state.token.isNotEmpty() && state.lastOkLocal > 0 && state.graceSec in 1..172800 &&
-            now >= state.lastOkLocal - 300000 && now - state.lastOkLocal <= state.graceSec * 1000
+    const val MAX_UNREACHABLE_MS = 7L * 24 * 60 * 60 * 1000
+    /** Largest step one monitor tick may add; larger gaps are sleep or a stalled process. */
+    const val MAX_UNREACHABLE_STEP_MS = 30_000L
+    const val UNREACHABLE_TICK_MS = 10_000L
+    const val UNREACHABLE_SAVE_EVERY_TICKS = 6
+
+    fun hasSession(state: GateState): Boolean = state.token.isNotEmpty()
+
+    fun addUnreachable(state: GateState, elapsedMs: Long): GateState =
+        state.copy(unreachableMs = state.unreachableMs + elapsedMs.coerceIn(0, MAX_UNREACHABLE_STEP_MS))
+
+    fun unreachableTooLong(state: GateState): Boolean = state.unreachableMs >= MAX_UNREACHABLE_MS
 
     fun verify(
         payload: String,

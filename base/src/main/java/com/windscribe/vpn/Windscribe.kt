@@ -46,6 +46,9 @@ import com.windscribe.vpn.wsnet.WSNetWrapper
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import com.windscribe.vpn.backend.VPNState
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeoutOrNull
@@ -146,6 +149,14 @@ open class Windscribe : MultiDexApplication() {
         appContext = this
         super.onCreate()
         employeeGate.start(applicationScope) { employeeUserRepository.get().logout() }
+        // The check started before connecting may not reach the access server on a filtered network;
+        // repeat it through the tunnel so a revocation still takes effect within seconds.
+        applicationScope.launch {
+            vpnConnectionStateManager.state
+                .map { it.status == VPNState.Status.Connected }
+                .distinctUntilChanged()
+                .collect { connected -> if (connected) employeeGate.recheckNow() }
+        }
         // Ensure notification channel exists before any service can start.
         // This must happen before DI so foreground services can post immediately.
         com.windscribe.vpn.backend.utils.ForegroundServiceHelper

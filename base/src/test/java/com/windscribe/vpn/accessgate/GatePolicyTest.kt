@@ -37,11 +37,28 @@ class GatePolicyTest {
         assertThrows(IllegalArgumentException::class.java) { GatePolicy.verify(tooLong, sig, key.a.toByteArray(), "employee", "device", "fresh") }
     }
 
-    @Test fun graceExpiresAndClockRollbackFailsClosed() {
-        val state = GateState(token = "token", lastOkLocal = 1_000_000, graceSec = 172800)
-        assertTrue(GatePolicy.withinGrace(state, 1_000_000 + 172800_000))
-        assertFalse(GatePolicy.withinGrace(state, 1_000_000 + 172800_001))
-        assertFalse(GatePolicy.withinGrace(state, 699999))
-        assertFalse(GatePolicy.withinGrace(state.copy(token = ""), 1_000_000))
+    @Test fun sessionNeverExpiresWithTime() {
+        // A device left unused for a month keeps its session; only a revocation or sign-out clears the token.
+        val month = GateState(token = "token", lastOkLocal = 1, graceSec = 172800)
+        assertTrue(GatePolicy.hasSession(month))
+        assertFalse(GatePolicy.unreachableTooLong(month))
+        assertFalse(GatePolicy.hasSession(month.copy(token = "")))
+    }
+
+    @Test fun unreachableTimeIsCappedPerStepAndLocksAtLimit() {
+        val state = GateState(token = "token")
+        assertEquals(10_000L, GatePolicy.addUnreachable(state, 10_000).unreachableMs)
+        // A sleep or stalled-process gap adds at most one step.
+        assertEquals(GatePolicy.MAX_UNREACHABLE_STEP_MS, GatePolicy.addUnreachable(state, 7L * 86_400_000).unreachableMs)
+        assertEquals(0L, GatePolicy.addUnreachable(state, -5_000).unreachableMs)
+        assertFalse(GatePolicy.unreachableTooLong(state.copy(unreachableMs = GatePolicy.MAX_UNREACHABLE_MS - 1)))
+        assertTrue(GatePolicy.unreachableTooLong(state.copy(unreachableMs = GatePolicy.MAX_UNREACHABLE_MS)))
+    }
+
+    @Test fun storedStateFromEarlierBuildsLoadsWithZeroUnreachableTime() {
+        val old = """{"username":"employee","deviceId":"device","token":"token","lastOkLocal":1,"lastOkServer":1,"graceSec":172800,"intervalSec":3600}"""
+        val state = com.google.gson.Gson().fromJson(old, GateState::class.java)
+        assertTrue(GatePolicy.hasSession(state))
+        assertEquals(0L, state.unreachableMs)
     }
 }

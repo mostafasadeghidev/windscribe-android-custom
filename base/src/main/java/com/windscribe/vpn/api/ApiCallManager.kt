@@ -46,6 +46,9 @@ import javax.inject.Inject
 import javax.inject.Singleton
 import kotlin.coroutines.resume
 
+/** Error code for calls the employee build refuses locally. */
+const val EMPLOYEE_BLOCKED = 39001
+
 @Singleton
 open class ApiCallManager
     @Inject
@@ -56,7 +59,25 @@ open class ApiCallManager
     ) : IApiCallManager {
         private val logger = LoggerFactory.getLogger("basic")
 
+        /**
+         * The employee build signs in to one shared Windscribe account. Nothing in it may change that
+         * account, reveal a web session for it, or sign another device in with it.
+         */
+        private val accountChangesBlocked = true
+
+        private fun <T> employeeBlocked(call: String): GenericResponseClass<T?, ApiErrorResponse?> {
+            logger.info("Blocked $call in the employee build.")
+            return GenericResponseClass(
+                null,
+                ApiErrorResponse().apply {
+                    errorCode = EMPLOYEE_BLOCKED
+                    errorMessage = "Not available in the employee app."
+                },
+            )
+        }
+
         override suspend fun getWebSession(): GenericResponseClass<WebSession?, ApiErrorResponse?> {
+            if (accountChangesBlocked) return employeeBlocked("getWebSession")
             checkSession()
             val api = wsNetWrapper.awaitServerAPI()
             return suspendCancellableCoroutine { continuation ->
@@ -69,6 +90,7 @@ open class ApiCallManager
         }
 
         override suspend fun addUserEmailAddress(email: String): GenericResponseClass<AddEmailResponse?, ApiErrorResponse?> {
+            if (accountChangesBlocked) return employeeBlocked("addUserEmailAddress")
             checkSession()
             val api = wsNetWrapper.awaitServerAPI()
             return suspendCancellableCoroutine { continuation ->
@@ -97,6 +119,7 @@ open class ApiCallManager
             email: String,
             voucherCode: String?,
         ): GenericResponseClass<ClaimAccountResponse?, ApiErrorResponse?> {
+            if (accountChangesBlocked) return employeeBlocked("claimAccount")
             checkSession()
             val api = wsNetWrapper.awaitServerAPI()
             return suspendCancellableCoroutine { continuation ->
@@ -304,6 +327,7 @@ open class ApiCallManager
         }
 
         override suspend fun loginWithCode(licenseCode: String): GenericResponseClass<UserLoginResponse?, ApiErrorResponse?> {
+            if (accountChangesBlocked) return employeeBlocked("loginWithCode")
             val api = wsNetWrapper.awaitServerAPI()
             return suspendCancellableCoroutine { continuation ->
 //                val callback =
@@ -387,6 +411,7 @@ open class ApiCallManager
             integrityToken: String?,
             installer: String?,
         ): GenericResponseClass<UserRegistrationResponse?, ApiErrorResponse?> {
+            if (accountChangesBlocked) return employeeBlocked("signUserIn")
             val api = wsNetWrapper.awaitServerAPI()
             return suspendCancellableCoroutine { continuation ->
                 val callback =
@@ -411,6 +436,7 @@ open class ApiCallManager
         }
 
         override suspend fun claimVoucherCode(voucherCode: String): GenericResponseClass<ClaimVoucherCodeResponse?, ApiErrorResponse?> {
+            if (accountChangesBlocked) return employeeBlocked("claimVoucherCode")
             checkSession()
             val api = wsNetWrapper.awaitServerAPI()
             return suspendCancellableCoroutine { continuation ->
@@ -441,6 +467,7 @@ open class ApiCallManager
             integrityToken: String?,
             installer: String?,
         ): GenericResponseClass<UserRegistrationResponse?, ApiErrorResponse?> {
+            if (accountChangesBlocked) return employeeBlocked("signUpUsingToken")
             val api = wsNetWrapper.awaitServerAPI()
             return suspendCancellableCoroutine { continuation ->
                 val callback =
@@ -458,6 +485,7 @@ open class ApiCallManager
             type: String,
             amazonUserId: String,
         ): GenericResponseClass<GenericSuccess?, ApiErrorResponse?> {
+            if (accountChangesBlocked) return employeeBlocked("verifyPurchaseReceipt")
             checkSession()
             val api = wsNetWrapper.awaitServerAPI()
             return suspendCancellableCoroutine { continuation ->
@@ -479,6 +507,7 @@ open class ApiCallManager
         override suspend fun verifyExpressLoginCode(
             loginCode: String,
         ): GenericResponseClass<VerifyExpressLoginResponse?, ApiErrorResponse?> {
+            if (accountChangesBlocked) return employeeBlocked("verifyExpressLoginCode")
             checkSession()
             val api = wsNetWrapper.awaitServerAPI()
             return suspendCancellableCoroutine { continuation ->
@@ -494,6 +523,7 @@ open class ApiCallManager
         }
 
         override suspend fun generateXPressLoginCode(): GenericResponseClass<XPressLoginCodeResponse?, ApiErrorResponse?> {
+            if (accountChangesBlocked) return employeeBlocked("generateXPressLoginCode")
             val api = wsNetWrapper.awaitServerAPI()
             return suspendCancellableCoroutine { continuation ->
                 val callback =
@@ -508,6 +538,7 @@ open class ApiCallManager
             loginCode: String,
             signature: String,
         ): GenericResponseClass<XPressLoginVerifyResponse?, ApiErrorResponse?> {
+            if (accountChangesBlocked) return employeeBlocked("verifyXPressLoginCode")
             val api = wsNetWrapper.awaitServerAPI()
             return suspendCancellableCoroutine { continuation ->
                 val callback =
@@ -534,6 +565,7 @@ open class ApiCallManager
         }
 
         override suspend fun postPromoPaymentConfirmation(pcpID: String): GenericResponseClass<GenericSuccess?, ApiErrorResponse?> {
+            if (accountChangesBlocked) return employeeBlocked("postPromoPaymentConfirmation")
             checkSession()
             val api = wsNetWrapper.awaitServerAPI()
             return suspendCancellableCoroutine { continuation ->
@@ -622,6 +654,7 @@ open class ApiCallManager
         override suspend fun resendUserEmailAddress(
             extraParams: Map<String, String>?,
         ): GenericResponseClass<AddEmailResponse?, ApiErrorResponse?> {
+            if (accountChangesBlocked) return employeeBlocked("resendUserEmailAddress")
             checkSession()
             val api = wsNetWrapper.awaitServerAPI()
             return suspendCancellableCoroutine { continuation ->
@@ -657,6 +690,7 @@ open class ApiCallManager
             integrityToken: String?,
             installer: String?,
         ): GenericResponseClass<SsoResponse?, ApiErrorResponse?> {
+            if (accountChangesBlocked) return employeeBlocked("sso")
             val api = wsNetWrapper.awaitServerAPI()
             return suspendCancellableCoroutine { continuation ->
                 val callback =
@@ -685,6 +719,7 @@ open class ApiCallManager
             username: String,
             useAsciiCaptcha: Boolean,
         ): GenericResponseClass<AuthToken?, ApiErrorResponse?> {
+            if (accountChangesBlocked) return employeeBlocked("authTokenSignup")
             val api = wsNetWrapper.awaitServerAPI()
             return suspendCancellableCoroutine { continuation ->
                 val callback =
@@ -718,6 +753,7 @@ open class ApiCallManager
         }
 
         override suspend fun passwordRecovery(email: String?): GenericResponseClass<GenericSuccess?, ApiErrorResponse?> {
+            if (accountChangesBlocked) return employeeBlocked("passwordRecovery")
             val api = wsNetWrapper.awaitServerAPI()
             return suspendCancellableCoroutine { continuation ->
                 val callback =

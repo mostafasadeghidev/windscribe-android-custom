@@ -88,13 +88,7 @@ fun MainMenuContent(
                 Screen.General.route,
                 hapticFeedbackEnabled,
             )
-            Spacer(modifier = Modifier.height(16.dp))
-            MainMenuItem(
-                R.string.my_account,
-                com.windscribe.mobile.R.drawable.ic_myaccount_icon,
-                Screen.Account.route,
-                hapticFeedbackEnabled,
-            )
+            // Account is hidden: it shows the shared Windscribe account and can sign other devices in.
             Spacer(modifier = Modifier.height(16.dp))
             MainMenuItem(
                 R.string.connection,

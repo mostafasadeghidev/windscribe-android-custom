@@ -67,10 +67,25 @@ jobs:
           fi
           short="${GITHUB_SHA:0:7}"
           tag="v${version}-private-${short}"
+          release_dir="$RUNNER_TEMP/release"
+          apk_dir="mobile/build/outputs/apk/fdroid/debug"
+          mkdir -p "$release_dir"
+          cp "$apk_dir/mobile-fdroid-universal-debug.apk" "$release_dir/Wind-Android-${version}.apk"
+          cp "$apk_dir/mobile-fdroid-arm64-v8a-debug.apk" "$release_dir/Wind-Android-${version}-64bit.apk"
+          cp "$apk_dir/mobile-fdroid-armeabi-v7a-debug.apk" "$release_dir/Wind-Android-${version}-32bit.apk"
+          cat > "$RUNNER_TEMP/release-notes.md" <<EOF
+          | گوشی | فایل نصب |
+          |---|---|
+          | همهٔ گوشی‌ها، پیشنهادی | \`Wind-Android-${version}.apk\` |
+          | فقط پردازندهٔ ۶۴ بیتی، حجم کمتر | \`Wind-Android-${version}-64bit.apk\` |
+          | فقط پردازندهٔ ۳۲ بیتی، حجم کمتر | \`Wind-Android-${version}-32bit.apk\` |
+
+          نسخهٔ آزمایشی خصوصی از کامیت \`${GITHUB_SHA}\`. با کلید ثابت امضا شده و روی نسخه‌های قبلی به‌روزرسانی نصب می‌شود.
+          EOF
           if ! gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             gh release create "$tag" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --prerelease \
-              --title "Private test ${version} (${short})" \
-              --notes "Private test build of commit ${GITHUB_SHA}. F-Droid debug APKs signed with the persistent private test keystore, so they install as updates over earlier private test builds." \
+              --title "Wind Android ${version} (${short})" \
+              --notes-file "$RUNNER_TEMP/release-notes.md" \
               || true
           fi
-          gh release upload "$tag" mobile/build/outputs/apk/fdroid/debug/*.apk --repo "$GITHUB_REPOSITORY" --clobber
+          gh release upload "$tag" "$release_dir"/* --repo "$GITHUB_REPOSITORY" --clobber

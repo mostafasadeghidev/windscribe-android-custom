@@ -15,6 +15,7 @@ import android.content.pm.PackageManager
 import android.net.ConnectivityManager
 import android.net.Network
 import android.net.NetworkCapabilities
+import android.net.NetworkRequest
 import android.net.wifi.WifiManager
 import android.os.Build
 import android.telephony.TelephonyManager
@@ -72,9 +73,25 @@ class DeviceStateManager
         // Store the whitelisted network name for comparison
         private var whitelistedNetworkName: String? = null
 
+        /** A stand-down on a network we could not name. Dropping it reads as "never connected". */
+        private var standDownWithoutName = false
+
+        /** The mirror of [whitelistedNetworkName]: that records "no here", this records "yes here". */
+        private var optedInNetworkName: String? = null
+
+        private val _isCurrentNetworkOptedIn = MutableStateFlow(false)
+
+        /**
+         * True when the user connected while on this network. Auto-Secure off means "do not bring the
+         * VPN up here by yourself", not permission to tear down a connection they started by hand —
+         * without this, any network re-emission (waking the device produces one) disconnected them.
+         */
+        val isCurrentNetworkOptedIn: StateFlow<Boolean> = _isCurrentNetworkOptedIn.asStateFlow()
+
         private var context: Context? = null
         private var connectivityManager: ConnectivityManager? = null
         private var networkCallback: ConnectivityManager.NetworkCallback? = null
+        private var underlyingNetworkCallback: ConnectivityManager.NetworkCallback? = null
         private var screenStateReceiver: ScreenStateBroadcastReceiver? = null
 
         // SharedFlow for network change events (for debouncing)
@@ -150,9 +167,42 @@ class DeviceStateManager
 
             try {
                 connectivityManager.registerDefaultNetworkCallback(networkCallback!!)
-                logger.info("Network callback registered using registerDefaultNetworkCallback()")
+                logger.debug("Network callback registered using registerDefaultNetworkCallback()")
             } catch (e: Exception) {
                 logger.error("Failed to register network callback", e)
+            }
+
+            // The default callback goes quiet on the underlying network once our tunnel is the
+            // default, so a Wi-Fi change mid-session would otherwise never reach us.
+            underlyingNetworkCallback =
+                object : ConnectivityManager.NetworkCallback() {
+                    override fun onAvailable(network: Network) {
+                        handleNetworkChange()
+                    }
+
+                    override fun onLost(network: Network) {
+                        handleNetworkChange()
+                    }
+
+                    override fun onCapabilitiesChanged(
+                        network: Network,
+                        networkCapabilities: NetworkCapabilities,
+                    ) {
+                        handleNetworkChange()
+                    }
+                }
+
+            try {
+                connectivityManager.registerNetworkCallback(
+                    NetworkRequest
+                        .Builder()
+                        .addCapability(NetworkCapabilities.NET_CAPABILITY_NOT_VPN)
+                        .addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+                        .build(),
+                    underlyingNetworkCallback!!,
+                )
+            } catch (e: Exception) {
+                logger.error("Failed to register the underlying network callback", e)
             }
         }
 
@@ -186,19 +236,30 @@ class DeviceStateManager
             if (force || currentDetail != detail) {
                 _networkDetail.emit(detail)
 
-                // Clear whitelist when network changes (so user can auto-connect when returning to network)
-                if (currentDetail?.name != detail?.name && whitelistedNetworkName != null) {
-                    logger.info("Network changed from ${currentDetail?.name} to ${detail?.name} - clearing whitelist")
-                    whitelistedNetworkName = null
+                // Both decisions are scoped to the network they were made on, so a change drops them.
+                if (currentDetail?.name != detail?.name) {
+                    if (whitelistedNetworkName != null) {
+                        logger.info("Network changed from ${currentDetail?.name} to ${detail?.name} - clearing whitelist")
+                        whitelistedNetworkName = null
+                    }
+                    if (optedInNetworkName != null) {
+                        logger.info("Network changed from ${currentDetail?.name} to ${detail?.name} - clearing opt-in")
+                        optedInNetworkName = null
+                    }
+                }
+                // Two unnamed networks compare equal above, so this cannot key off the name.
+                if (standDownWithoutName) {
+                    logger.info("Network changed - clearing the unnamed stand-down")
+                    standDownWithoutName = false
                 }
             }
 
-            // Update whitelisted network state
             updateWhitelistedNetworkState(detail)
+            updateOptedInNetworkState(detail)
 
             // Log only if something changed
             if (force || currentOnline != online || currentDetail != detail) {
-                logger.info("Network: online={}, {}", online, detail ?: "no detail")
+                logger.debug("Network: online={}, {}", online, detail ?: "no detail")
             }
         }
 
@@ -207,7 +268,9 @@ class DeviceStateManager
          * Non-blocking operation using StateFlow.value assignment.
          */
         private fun updateWhitelistedNetworkState(currentNetworkDetail: NetworkDetail?) {
-            val isWhitelisted = currentNetworkDetail?.name != null && currentNetworkDetail.name == whitelistedNetworkName
+            val isWhitelisted =
+                standDownWithoutName ||
+                    (currentNetworkDetail?.name != null && currentNetworkDetail.name == whitelistedNetworkName)
             if (_isCurrentNetworkWhitelisted.value != isWhitelisted) {
                 _isCurrentNetworkWhitelisted.value = isWhitelisted
                 logger.debug(
@@ -224,8 +287,40 @@ class DeviceStateManager
          */
         fun setWhitelistedNetwork(networkName: String?) {
             whitelistedNetworkName = networkName
-            logger.info("Whitelisted network set to: $networkName")
+            if (networkName == null) {
+                standDownWithoutName = false
+            }
+            logger.debug("Whitelisted network set to: $networkName")
             updateWhitelistedNetworkState(_networkDetail.value)
+        }
+
+        /** Records that the user disconnected here, whether or not the network can be named. */
+        fun standDownCurrentNetwork() {
+            val networkName = getCurrentNetworkName()
+            if (networkName != null) {
+                whitelistedNetworkName = networkName
+            } else {
+                standDownWithoutName = true
+            }
+            logger.info("User disconnected - standing down auto-connect on: ${networkName ?: "an unnamed network"}")
+            updateWhitelistedNetworkState(_networkDetail.value)
+        }
+
+        private fun updateOptedInNetworkState(currentNetworkDetail: NetworkDetail?) {
+            val isOptedIn = currentNetworkDetail?.name != null && currentNetworkDetail.name == optedInNetworkName
+            if (_isCurrentNetworkOptedIn.value != isOptedIn) {
+                _isCurrentNetworkOptedIn.value = isOptedIn
+                logger.debug(
+                    "Opted-in network state changed: $isOptedIn (current: ${currentNetworkDetail?.name}, opted in: $optedInNetworkName)",
+                )
+            }
+        }
+
+        /** Records that the user connected on [networkName], or clears it with null. */
+        fun setOptedInNetwork(networkName: String?) {
+            optedInNetworkName = networkName
+            logger.debug("Opted-in network set to: $networkName")
+            updateOptedInNetworkState(_networkDetail.value)
         }
 
         /**
@@ -263,14 +358,63 @@ class DeviceStateManager
             }
 
         /**
+         * The network we report on, resolving past our own VPN. Our tunnel is this app's default
+         * network while it is up, and below API 29 a VPN network's capabilities carry TRANSPORT_VPN
+         * alone — the underlying transports are merged in only from API 29 — so reading the active
+         * network there yields no transport and no name for the whole connected session.
+         */
+        private fun ConnectivityManager.getUnderlyingNetworkCompat(): Network? {
+            val active = getActiveNetworkCompat()
+            if (active != null && capabilitiesOrNull(active)?.hasTransport(NetworkCapabilities.TRANSPORT_VPN) != true) {
+                return active
+            }
+            return bestNonVpnNetwork() ?: active
+        }
+
+        /** Validated first, then the transport order [getCurrentNetworkType] reports in. */
+        @Suppress("DEPRECATION")
+        private fun ConnectivityManager.bestNonVpnNetwork(): Network? =
+            try {
+                allNetworks
+                    .mapNotNull { network -> capabilitiesOrNull(network)?.let { network to it } }
+                    .filter { (_, caps) ->
+                        caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_VPN) &&
+                            caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+                    }.minWithOrNull(
+                        compareBy(
+                            { (_, caps) -> if (caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)) 0 else 1 },
+                            { (_, caps) -> transportRank(caps) },
+                        ),
+                    )?.first
+            } catch (e: Exception) {
+                logger.warn("Could not scan for a non-VPN network: ${e.message}")
+                null
+            }
+
+        private fun transportRank(caps: NetworkCapabilities): Int =
+            when {
+                caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) -> 0
+                caps.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET) -> 1
+                caps.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) -> 2
+                else -> 3
+            }
+
+        private fun ConnectivityManager.capabilitiesOrNull(network: Network): NetworkCapabilities? =
+            try {
+                getNetworkCapabilities(network)
+            } catch (_: Exception) {
+                null
+            }
+
+        /**
          * Checks if there's underlying connectivity (WiFi or Cellular with validated internet).
          * Returns true only if there's a network with underlying transport and working internet.
          * On API < 23 (including Fire OS), validation check is optional as it may not be properly set.
          */
         private fun hasUnderlyingConnectivity(): Boolean {
             return try {
-                val activeNetwork = connectivityManager?.getActiveNetworkCompat() ?: return false
-                val caps = connectivityManager?.getNetworkCapabilities(activeNetwork) ?: return false
+                val underlying = connectivityManager?.getUnderlyingNetworkCompat() ?: return false
+                val caps = connectivityManager?.getNetworkCapabilities(underlying) ?: return false
 
                 val hasInternet = caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
                 val hasWifi = caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)
@@ -293,10 +437,9 @@ class DeviceStateManager
          */
         private fun getCurrentNetworkType(): NetworkType {
             return try {
-                // Get the active network
-                val activeNetwork = connectivityManager?.getActiveNetworkCompat() ?: return NetworkType.NONE
+                val underlying = connectivityManager?.getUnderlyingNetworkCompat() ?: return NetworkType.NONE
                 val caps =
-                    connectivityManager?.getNetworkCapabilities(activeNetwork) ?: return NetworkType.NONE
+                    connectivityManager?.getNetworkCapabilities(underlying) ?: return NetworkType.NONE
 
                 // Check if it has internet capability
                 if (!caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)) {
@@ -464,6 +607,15 @@ class DeviceStateManager
             }
             networkCallback = null
 
+            underlyingNetworkCallback?.let { callback ->
+                try {
+                    connectivityManager?.unregisterNetworkCallback(callback)
+                } catch (e: Exception) {
+                    logger.error("Error unregistering the underlying network callback", e)
+                }
+            }
+            underlyingNetworkCallback = null
+
             // Unregister screen state receiver
             screenStateReceiver?.let { receiver ->
                 try {
@@ -501,7 +653,7 @@ class DeviceStateManager
                     isOnline.collect { online ->
                         withContext(Dispatchers.Main) {
                             wsNetWrapper.withWSNet { wsNet ->
-                                logger.info("Updated wsnet network status to $online")
+                                logger.debug("Updated wsnet network status to $online")
                                 wsNet.setConnectivityState(online)
                             }
                         }

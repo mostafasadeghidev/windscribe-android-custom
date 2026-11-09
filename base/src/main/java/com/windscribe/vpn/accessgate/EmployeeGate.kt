@@ -103,7 +103,7 @@ class EmployeeGate @Inject constructor(
         val body = JsonObject().apply {
             addProperty("username", username); addProperty("password", password)
             addProperty("device_id", id); addProperty("device_name", Build.MODEL)
-            addProperty("platform", "android"); addProperty("app_version", "4.3-employee-test")
+            addProperty("platform", "android"); addProperty("app_version", "4.4-employee-test")
             addProperty("nonce", nonce)
         }
         val reply = post("login", body)
@@ -160,7 +160,7 @@ class EmployeeGate @Inject constructor(
                 val reply = post("check", JsonObject().apply {
                     addProperty("username", current.username); addProperty("device_id", current.deviceId)
                     addProperty("token", current.token); addProperty("nonce", nonce)
-                    addProperty("app_version", "4.3-employee-test")
+                    addProperty("app_version", "4.4-employee-test")
                 })
                 val verified = verify(reply, current.username, current.deviceId, nonce)
                 val revoked = synchronized(stateLock) {

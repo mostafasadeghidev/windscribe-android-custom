@@ -107,6 +107,7 @@ class WSNetWrapper(
             captureSubApis(wsNet)
             applyIntegration(wsNet, integration)
             applyLicenseCode(wsNet, preferencesHelper.licenceCode ?: "")
+            applyApiRelay()
             initialized.set(true)
             updateReadyState()
             logger.debug("WSNet initialized successfully")
@@ -133,6 +134,16 @@ class WSNetWrapper(
             tunnelTestInstance = wsNet.tunnelTest()
         } catch (e: Exception) {
             logger.error("Failed to capture WSNet sub-API peers: ${e.message}", e)
+        }
+    }
+
+    /** Employee build: Windscribe API calls go through the company worker, which is reachable where Windscribe is blocked. */
+    private fun applyApiRelay() {
+        try {
+            serverAPIInstance?.setApiResolutionsSettings(API_RELAY_ROOT, ASSETS_RELAY_ROOT)
+            logger.debug("WSNet API relay set to $API_RELAY_ROOT")
+        } catch (e: Exception) {
+            logger.error("Failed to set WSNet API relay: ${e.message}", e)
         }
     }
 
@@ -364,6 +375,9 @@ class WSNetWrapper(
         }
     }
 }
+
+private const val API_RELAY_ROOT = "wind-gate.throbbing-boat-c9fc.workers.dev/ws/api"
+private const val ASSETS_RELAY_ROOT = "wind-gate.throbbing-boat-c9fc.workers.dev/ws/assets"
 
 /** Curl requests are kept deliberately: they are the evidence a worker actually ran. */
 internal fun isWsNetNoise(message: String): Boolean =
